@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cesm-runner-mcp"
+version = "0.1.0"
+description = "MCP server for driving CESM case lifecycle (setup, build, submit, monitor)"
+requires-python = ">=3.11"
+dependencies = ["fastmcp>=2.0"]
+
+[project.scripts]
+cesm-runner-mcp = "server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tools"]
