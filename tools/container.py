@@ -30,11 +30,29 @@ DEFAULT_SANDBOX = Path(DERECHO_SCRATCH_ROOT) / "crocontainer_sandbox"
 OMPI_ENV = ["OMPI_CC=gcc", "OMPI_FC=gfortran", "OMPI_CXX=g++"]
 
 
+def _try_module_load(module: str) -> bool:
+    """Try 'module load <module>' and update PATH if it succeeds. Returns True on success."""
+    try:
+        result = subprocess.run(
+            ["bash", "-c", f"module load {module} && echo $PATH"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            os.environ["PATH"] = result.stdout.strip()
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _detect_runtime() -> str:
     if shutil.which("apptainer"):
         return "apptainer"
     if shutil.which("podman"):
         return "podman"
+    # On Derecho/Casper, apptainer may need to be loaded via the module system
+    if _try_module_load("apptainer") and shutil.which("apptainer"):
+        return "apptainer"
     return "none"
 
 
@@ -42,7 +60,11 @@ def _resolve_runtime(runtime: str) -> str:
     if runtime == "auto":
         rt = _detect_runtime()
         if rt == "none":
-            raise RuntimeError("Neither apptainer nor podman found on PATH")
+            raise RuntimeError(
+                "Neither apptainer nor podman found on PATH. "
+                "On Derecho/Casper run 'module load apptainer' before starting the MCP server, "
+                "or on a laptop ensure podman is installed."
+            )
         return rt
     return runtime
 
