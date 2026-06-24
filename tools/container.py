@@ -31,14 +31,17 @@ OMPI_ENV = ["OMPI_CC=gcc", "OMPI_FC=gfortran", "OMPI_CXX=g++"]
 
 
 def _try_module_load(module: str) -> bool:
-    """Try 'module load <module>' and update PATH if it succeeds. Returns True on success."""
+    """Try 'module load <module>' via a login shell and update PATH if it succeeds."""
     try:
+        # Use --login so /etc/profile.d/ is sourced and the module function is available.
         result = subprocess.run(
-            ["bash", "-c", f"module load {module} && echo $PATH"],
-            capture_output=True, text=True, timeout=10,
+            ["bash", "--login", "-c", f"module load {module} && echo $PATH"],
+            capture_output=True, text=True, timeout=30,
         )
         if result.returncode == 0 and result.stdout.strip():
-            os.environ["PATH"] = result.stdout.strip()
+            # The last line of stdout is the PATH printed after module load.
+            path_line = result.stdout.strip().splitlines()[-1]
+            os.environ["PATH"] = path_line
             return True
     except Exception:
         pass
@@ -202,7 +205,9 @@ def container_exec(name: str, case_dir: str, command: str, runtime: str = "auto"
     shell_cmd = f"cd {case} && {command}"
 
     if rt == "apptainer":
-        cmd = ["apptainer", "exec", f"instance://{name}", "bash", "-c", shell_cmd]
+        # Unset NCAR_HOST so CESM machine detection works correctly inside the container
+        # (NCAR_HOST=casper on the host would cause a machine mismatch for derecho cases).
+        cmd = ["apptainer", "exec", "--env", "NCAR_HOST=", f"instance://{name}", "bash", "-c", shell_cmd]
     elif rt == "podman":
         # For podman: bind the case dir at start time isn't possible after launch,
         # so we use podman exec (case dir must have been mounted at start, or is on a
