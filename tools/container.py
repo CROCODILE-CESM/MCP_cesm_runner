@@ -248,6 +248,82 @@ def stop_container(name: str, runtime: str = "auto") -> str:
     return f"Container session '{name}' stopped."
 
 
+def run_case_in_container(
+    container: str,
+    bundle_dir: str,
+    runtime: str = "auto",
+    timeout: int = 7200,
+) -> str:
+    """
+    Deploy a CrocoDash bundle to a running container and run it end-to-end.
+
+    This is the fast-iteration path for running a regional MOM6 case without
+    touching the HPC batch queue. It combines three steps into one call:
+      1. Copy the bundle into /workspace/bundle/ inside the container
+      2. Run /workspace/run_case.sh (case setup → build → submit --no-batch)
+      3. Return the full output for inspection
+
+    On Derecho (Apptainer): /glade is bind-mounted so the copy is just a shell
+    cp from the mounted path. On laptop (Podman): uses `podman cp` to push the
+    bundle into the container before running.
+
+    Prerequisites:
+      - start_container must already be running (use start_container first)
+      - bundle_case (CrocoDash MCP) must have been run to create the bundle
+      - For Derecho, the Apptainer sandbox must exist (build_sandbox)
+
+    Parameters
+    ----------
+    container : str
+        Session name from start_container.
+    bundle_dir : str
+        Host path to the bundle folder created by bundle_case.
+        On Derecho this can be any /glade path — it's visible inside the container.
+    runtime : str
+        "auto" (default), "apptainer", or "podman".
+    timeout : int
+        Seconds to wait for the full case run (default 7200 = 2h).
+
+    Returns
+    -------
+    The full stdout+stderr from run_case.sh. Check for "SUCCESSFUL" near the end.
+    """
+    rt = _resolve_runtime(runtime)
+    bundle_path = Path(bundle_dir).expanduser().resolve()
+
+    if not bundle_path.exists():
+        return f"ERROR: bundle_dir does not exist: {bundle_path}"
+
+    if rt == "apptainer":
+        # /glade is mounted transparently — copy bundle to /workspace/bundle/ via shell
+        copy_cmd = f"rm -rf /workspace/bundle && cp -r {bundle_path} /workspace/bundle"
+        copy_result = subprocess.run(
+            ["apptainer", "exec", "--env", "NCAR_HOST=", f"instance://{container}",
+             "bash", "-c", copy_cmd],
+            capture_output=True, text=True, timeout=120,
+        )
+        if copy_result.returncode != 0:
+            return f"FAILED copying bundle into container:\n{copy_result.stderr}"
+
+    elif rt == "podman":
+        # podman cp pushes the bundle directory into the container
+        rm_result = subprocess.run(
+            ["podman", "exec", container, "bash", "-c", "rm -rf /workspace/bundle"],
+            capture_output=True, text=True,
+        )
+        cp_result = subprocess.run(
+            ["podman", "cp", str(bundle_path), f"{container}:/workspace/bundle"],
+            capture_output=True, text=True,
+        )
+        if cp_result.returncode != 0:
+            return f"FAILED copying bundle into podman container:\n{cp_result.stderr}"
+    else:
+        return f"ERROR: unknown runtime '{rt}'"
+
+    # Run the full case pipeline inside the container
+    return container_exec(container, "/workspace", "/bin/bash /workspace/run_case.sh", runtime=runtime)
+
+
 def list_containers(runtime: str = "auto") -> str:
     """
     List running crocontainer sessions.
