@@ -258,14 +258,39 @@ def run_case_in_container(
     Deploy a CrocoDash bundle to a running container and run it end-to-end.
 
     This is the fast-iteration path for running a regional MOM6 case without
-    touching the HPC batch queue. It combines three steps into one call:
-      1. Copy the bundle into /workspace/bundle/ inside the container
-      2. Run /workspace/run_case.sh (case setup → build → submit --no-batch)
-      3. Return the full output for inspection
+    touching the HPC batch queue. It copies the bundle into the container and
+    executes /workspace/run_case.sh, which performs the full lifecycle:
 
-    On Derecho (Apptainer): /glade is bind-mounted so the copy is just a shell
-    cp from the mounted path. On laptop (Podman): uses `podman cp` to push the
-    bundle into the container before running.
+    Step 1 — Case creation (one of three modes, checked in order):
+      a. YAML mode:   if /workspace/case.yaml exists → `crocodash create --config case.yaml`
+      b. Script mode: if /workspace/case_setup.py exists → `python case_setup.py`
+      c. Bundle mode: otherwise → `python create_case_from_bundle.py`
+                      (uses ForkCrocoDashBundle to recreate the case for machine=ubuntu-latest)
+      The created case lands at /workspace/case.
+
+    Step 2 — Pre-build configuration (always applied):
+      - NTASKS set to 1 (single-process run)
+      - case.setup --reset
+      - DOUT_S=False (disable short-term archiver)
+      - DIN_LOC_ROOT=/root/cesm/inputdata
+      - Container cmake_macros injected (gnu_ubuntu-latest.cmake) to pin MPI paths
+        and prevent host HPC libraries from leaking into the build
+      - ESMFMKFILE resolved from ESMF_INSTALL_PREFIX inside the container
+      - OMPI_CC/FC/CXX set to gcc/gfortran/g++
+      - NCAR_HOST unset (prevents Derecho machine detection inside container)
+
+    Step 3 — JRA55 stream narrowing (JRA compsets only, skipped for NYF):
+      - Reads DATM_YR_START / DATM_YR_END from the case XML
+      - Appends year_first/year_last/year_align/datafiles overrides to
+        user_nl_datm_streams for all 8 JRA55 fields (PREC, LWDN, SWDN, Q_10,
+        SLP_, T_10, U_10, V_10) so only the needed years are read
+
+    Step 4 — Build and run:
+      - ./case.build
+      - ./case.submit --no-batch  (runs inline, no PBS queue)
+
+    On Derecho (Apptainer): /glade is bind-mounted so the bundle copy is a
+    plain shell cp from the mounted path. On laptop (Podman): uses `podman cp`.
 
     Prerequisites:
       - start_container must already be running (use start_container first)
