@@ -1,4 +1,23 @@
-"""CESM Runner MCP — drives any CESM case through setup, build, submit, and monitoring."""
+"""CESM Runner MCP — drives any CESM case through setup, build, submit, and monitoring.
+
+Deployment paths (pair with CrocoDash MCP for case creation):
+
+  PATH A — HPC batch queue (no container):
+    case_setup → case_build → case_submit
+    Build takes 10–30 min on a compute node via PBS.
+
+  PATH B — HPC + container, no queue (fast iteration, Derecho):
+    build_sandbox  (one-time, ~1hr)
+    start_container(scratch_dir=...) → run_case_in_container(container, bundle_dir)
+    Full setup+build+run inside Apptainer; no queue wait.
+
+  PATH C — Laptop + container (Podman), no queue:
+    start_container(inputdata_dir=...) → run_case_in_container(container, bundle_dir)
+    Pulls ghcr.io/crocodile-cesm/crocontainer:latest-amd64 automatically.
+
+run_case_in_container is the single call for PATH B and C:
+  it copies the bundle → /workspace/bundle/ and runs run_case.sh end-to-end.
+"""
 
 from fastmcp import FastMCP
 
@@ -7,7 +26,7 @@ from tools.lifecycle import case_setup, case_build, case_submit
 from tools.config import xmlquery, xmlchange, preview_run
 from tools.logs import tail_log, get_job_status
 from tools.discovery import list_compsets
-from tools.container import build_sandbox, start_container, container_exec, stop_container, list_containers
+from tools.container import build_sandbox, start_container, container_exec, stop_container, list_containers, run_case_in_container
 
 mcp = FastMCP("cesm-runner")
 
@@ -36,6 +55,7 @@ mcp.add_tool(list_compsets)
 # Container management (crocontainer fast-iteration path)
 mcp.add_tool(build_sandbox)
 mcp.add_tool(start_container)
+mcp.add_tool(run_case_in_container)
 mcp.add_tool(container_exec)
 mcp.add_tool(stop_container)
 mcp.add_tool(list_containers)
